@@ -22,6 +22,7 @@ pub struct BowlingGame {
 }
 
 impl BowlingGame {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             score: 0,
