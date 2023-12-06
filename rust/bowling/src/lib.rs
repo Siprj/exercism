@@ -1,4 +1,4 @@
-use std::default;
+use std::{collections::VecDeque, iter::repeat};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -8,27 +8,25 @@ pub enum Error {
 
 #[derive(Debug, Clone, PartialEq)]
 enum GameState {
-    Starting,
-    GameInProgress,
-    FinishingFrame(u16),
-    FinalRolls(u8, u16),
+    GameInProgress(u32, Option<u16>),
+    Finishing(u16, u16),
     GameDone,
 }
 use GameState::*;
 
 #[derive(Debug, Clone)]
 pub struct BowlingGame {
-    rolls: Vec<u16>,
+    score: u16,
+    multipliers: VecDeque<u16>,
     state: GameState,
-    frames: usize,
 }
 
 impl BowlingGame {
     pub fn new() -> Self {
         Self {
-            rolls: vec![],
-            state: Starting,
-            frames: 0,
+            score: 0,
+            multipliers: repeat(1).take(2).collect(),
+            state: GameInProgress(0, None),
         }
     }
 
@@ -37,82 +35,71 @@ impl BowlingGame {
             return Err(Error::NotEnoughPinsLeft);
         }
         match self.state {
-            Starting => {
-                self.state = GameInProgress;
-                self.rolls.push(pins);
-                if pins == 10 {
-                    self.frames += 1;
-                } else {
-                    self.state = FinishingFrame(pins);
-                }
-                Ok(())
-            },
-            FinishingFrame(previous) => {
-                if previous + pins > 10 {
-                    return Err(Error::NotEnoughPinsLeft);
-                }
-                self.rolls.push(pins);
-                self.frames += 1;
-                if self.frames == 10 {
-                    if previous + pins == 10 {
-                        self.state = FinalRolls(1, 10);
-                    }else {
+            GameInProgress(frame_count, running_frame) => {
+                let new_frame_count = frame_count + 1;
+
+                if let Some(triped_pins) = running_frame {
+                    let frame_triped_pins = pins + triped_pins;
+                    if pins + triped_pins > 10 {
+                        return Err(Error::NotEnoughPinsLeft);
+                    }
+                    let multiplier = self.multipliers.pop_front().expect("thre should always be two multipliers");
+                    self.multipliers.push_back(1);
+
+                    self.score += pins * multiplier;
+                    if new_frame_count == 10  && frame_triped_pins == 10 {
+                        self.state = Finishing(1, 10);
+                    } else if new_frame_count == 10 {
                         self.state = GameDone;
+                    } else {
+                        if frame_triped_pins == 10 {
+                            self.multipliers[0] += 1;
+                        }
+                        self.state = GameInProgress(new_frame_count, None);
                     }
                 } else {
-                        self.state = GameInProgress;
-                }
-                Ok(())
-            },
-            GameDone => Err(Error::GameComplete),
-            GameInProgress => {
-                self.rolls.push(pins);
-                if pins == 10 {
-                    self.frames += 1;
-                    if self.frames == 10 {
-                        self.state = FinalRolls(2, 10);
+                    let multiplier = self.multipliers.pop_front().expect("thre should always be two multipliers");
+                    self.multipliers.push_back(1);
+
+                    self.score += pins * multiplier;
+                    if pins == 10 {
+                        if new_frame_count == 10 {
+                            self.state = Finishing(2, 10);
+                        } else {
+                            self.multipliers[0] += 1;
+                            self.multipliers[1] += 1;
+                            self.state = GameInProgress(new_frame_count, None);
+                        }
+                    } else {
+                        self.state = GameInProgress(frame_count, Some(pins));
                     }
-                } else {
-                    self.state = FinishingFrame(pins);
                 }
-                Ok(())
             },
-            FinalRolls(count, pins_left) => {
-                self.rolls.push(pins);
-                if pins > pins_left {
+            Finishing(rolls, finishing_pins) => {
+                if pins > finishing_pins {
                     return Err(Error::NotEnoughPinsLeft);
                 }
-                if count == 1 {
-                    self.state = GameDone;
+
+                let multiplier = self.multipliers.pop_front().expect("thre should always be two multipliers");
+                self.multipliers.push_back(1);
+
+                self.score += pins * multiplier;
+                if rolls - 1 > 0 {
+                    self.state = Finishing(rolls - 1, if pins == 10 { 10 } else {finishing_pins - pins})
                 } else {
-                    let nex_pin_count = if pins == 10 { 10 } else {10 - pins};
-                    self.state = FinalRolls(1, nex_pin_count);
+                    self.state = GameDone;
                 }
-                Ok(())
             },
+            GameDone => {return Err(Error::GameComplete);},
         }
+        Ok(())
     }
 
     pub fn score(&self) -> Option<u16> {
-        if self.state != GameDone {
-            return None;
+        if self.state == GameDone {
+            Some(self.score)
+        } else {
+            None
         }
-        let mut index = 0;
-        let mut score: u16 = 0;
-        for _ in 0..10 {
-            if self.rolls[index] == 10 {
-                score += 10 + self.rolls[index + 1] + self.rolls[index + 2];
-                index += 1;
-
-            } else {
-                let frame_sum = self.rolls[index] + self.rolls[index + 1];
-                score += frame_sum;
-                if frame_sum == 10 {
-                    score += self.rolls[index + 2];
-                }
-                index += 2;
-            }
-        }
-        Some(score)
     }
 }
